@@ -1,0 +1,21 @@
+# Elm build artifacts and cache
+/elm-stuff/
+/repl-temp-*
+/elm.js
+
+# Optional local build output
+/build/
+/dist/
+
+# Node tooling, if the project grows a frontend toolchain
+/node_modules/
+/npm-debug.log*
+/yarn-debug.log*
+/yarn-error.log*
+/pnpm-debug.log*
+
+# OS and editor noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
