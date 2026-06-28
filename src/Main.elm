@@ -4,14 +4,16 @@ import Browser
 import Browser.Events
 import Html exposing (Html)
 import Json.Decode as Decode
-import Svg exposing (Svg, polygon, rect, svg)
-import Svg.Attributes exposing (fill, height, points, stroke, strokeWidth, transform, viewBox, width)
+import Svg exposing (Svg, circle, polygon, rect, svg)
+import Svg.Attributes exposing (cx, cy, fill, height, points, r, stroke, strokeWidth, transform, viewBox, width)
 
 
 type alias Model =
     { elapsedMs : Float
     , ship : Ship
     , controls : Controls
+    , bullets : List Bullet
+    , timeSinceLastShotMs : Float
     }
 
 
@@ -31,10 +33,18 @@ type alias Vec2 =
     }
 
 
+type alias Bullet =
+    { position : Vec2
+    , velocity : Vec2
+    , ageMs : Float
+    }
+
+
 type alias Controls =
     { thrusting : Bool
     , turningLeft : Bool
     , turningRight : Bool
+    , firing : Bool
     }
 
 
@@ -58,6 +68,8 @@ init _ =
     ( { elapsedMs = 0
       , ship = initialShip
       , controls = initialControls
+      , bullets = []
+      , timeSinceLastShotMs = shotCooldownMs
       }
     , Cmd.none
     )
@@ -67,9 +79,21 @@ update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
         Tick deltaMs ->
+            let
+                ship =
+                    updateShip deltaMs model.controls model.ship
+
+                advancedBullets =
+                    updateBullets deltaMs model.bullets
+
+                fireResult =
+                    updateFiring deltaMs model.controls ship advancedBullets model.timeSinceLastShotMs
+            in
             ( { model
                 | elapsedMs = model.elapsedMs + deltaMs
-                , ship = updateShip deltaMs model.controls model.ship
+                , ship = ship
+                , bullets = fireResult.bullets
+                , timeSinceLastShotMs = fireResult.timeSinceLastShotMs
               }
             , Cmd.none
             )
@@ -97,6 +121,7 @@ view model =
         , viewBox "0 0 800 600"
         ]
         [ background
+        , Svg.g [] (List.map viewBullet model.bullets)
         , viewShip model.ship
         ]
 
@@ -127,6 +152,7 @@ initialControls =
     { thrusting = False
     , turningLeft = False
     , turningRight = False
+    , firing = False
     }
 
 
@@ -146,6 +172,15 @@ updateControls key isPressed controls =
 
         "ArrowRight" ->
             { controls | turningRight = isPressed }
+
+        " " ->
+            { controls | firing = isPressed }
+
+        "Spacebar" ->
+            { controls | firing = isPressed }
+
+        "Space" ->
+            { controls | firing = isPressed }
 
         _ ->
             controls
@@ -205,6 +240,71 @@ thrustFromHeading heading =
     }
 
 
+updateBullets : Float -> List Bullet -> List Bullet
+updateBullets deltaMs bullets =
+    let
+        deltaSeconds =
+            deltaMs / 1000
+
+        updateBullet bullet =
+            { bullet
+                | position = wrapPosition (add bullet.position (scale deltaSeconds bullet.velocity))
+                , ageMs = bullet.ageMs + deltaMs
+            }
+    in
+    bullets
+        |> List.map updateBullet
+        |> List.filter (\bullet -> bullet.ageMs < bulletTimeToLiveMs)
+
+
+updateFiring : Float -> Controls -> Ship -> List Bullet -> Float -> { bullets : List Bullet, timeSinceLastShotMs : Float }
+updateFiring deltaMs controls ship bullets timeSinceLastShotMs =
+    if controls.firing then
+        let
+            availableShotTimeMs =
+                timeSinceLastShotMs + deltaMs
+
+            shotsToFire =
+                floor (availableShotTimeMs / shotCooldownMs)
+
+            remainingShotTimeMs =
+                availableShotTimeMs - toFloat shotsToFire * shotCooldownMs
+        in
+        { bullets = bullets ++ List.repeat shotsToFire (createBullet ship)
+        , timeSinceLastShotMs = remainingShotTimeMs
+        }
+
+    else
+        { bullets = bullets
+        , timeSinceLastShotMs = shotCooldownMs
+        }
+
+
+createBullet : Ship -> Bullet
+createBullet ship =
+    let
+        direction =
+            directionFromHeading ship.heading
+
+        position =
+            wrapPosition (add ship.position (scale bulletSpawnOffset direction))
+
+        velocity =
+            add ship.velocity (scale bulletSpeed direction)
+    in
+    { position = position
+    , velocity = velocity
+    , ageMs = 0
+    }
+
+
+directionFromHeading : Float -> Vec2
+directionFromHeading heading =
+    { x = sin heading
+    , y = -(cos heading)
+    }
+
+
 viewShip : Ship -> Svg Msg
 viewShip ship =
     polygon
@@ -221,6 +321,17 @@ viewShip ship =
                 ++ String.fromFloat (radiansToDegrees ship.heading)
                 ++ ")"
             )
+        ]
+        []
+
+
+viewBullet : Bullet -> Svg Msg
+viewBullet bullet =
+    circle
+        [ cx (String.fromFloat bullet.position.x)
+        , cy (String.fromFloat bullet.position.y)
+        , r (String.fromFloat bulletRadius)
+        , fill "#fff"
         ]
         []
 
@@ -286,3 +397,33 @@ thrustPower =
 turnSpeed : Float
 turnSpeed =
     4
+
+
+bulletsPerSecond : Float
+bulletsPerSecond =
+    7
+
+
+shotCooldownMs : Float
+shotCooldownMs =
+    1000 / bulletsPerSecond
+
+
+bulletTimeToLiveMs : Float
+bulletTimeToLiveMs =
+    900
+
+
+bulletSpeed : Float
+bulletSpeed =
+    430
+
+
+bulletRadius : Float
+bulletRadius =
+    2
+
+
+bulletSpawnOffset : Float
+bulletSpawnOffset =
+    24
